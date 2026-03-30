@@ -1,0 +1,29 @@
+name: 每日自動更新股價大腦
+
+on:
+  schedule:
+    # 每天 UTC 時間 09:30 執行 (香港時間 17:30，港股收市後)
+    - cron: '30 9 * * 1-5' # 1-5 代表星期一至五
+  workflow_dispatch: 
+    # 允許我們在 GitHub 手動撳掣測試
+
+jobs:
+  update-prices:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 下載源碼
+        uses: actions/checkout@v3
+
+      - name: 🐍 設定 Python 環境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 📦 安裝依賴套件 (yfinance, firebase)
+        run: |
+          pip install firebase-admin yfinance pytz pandas
+
+      - name: 🚀 執行報價更新腳本
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: python update_prices.py
