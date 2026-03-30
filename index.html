@@ -96,7 +96,12 @@
         .type-buy { color: #00E676; font-weight: bold; }
         .type-sell { color: #FF1744; font-weight: bold; }
         .history-detail p { margin: 2px 0; font-size: 0.85rem; color: #bbb;}
+        
+        /* 🌟 歷史紀錄的修改與刪除按鈕 */
+        .history-actions { display: flex; gap: 10px; }
+        .history-edit { background: none; border: none; color: #FFD700; cursor: pointer; font-size: 1.2rem;}
         .history-delete { background: none; border: none; color: #555; cursor: pointer; font-size: 1.2rem;}
+        .history-edit:hover { color: #fff; }
         .history-delete:hover { color: #FF1744; }
         
         @media (max-width: 500px) { .fab { left: auto; right: 20px; margin-left: 0; } }
@@ -162,7 +167,7 @@
 
         <div class="modal" id="add-modal">
             <div class="modal-content">
-                <h3>新增交易紀錄</h3>
+                <h3 id="transaction-modal-title">新增交易紀錄</h3>
                 <div style="display:flex; gap:10px; margin-bottom:15px;">
                     <select id="input-type" style="flex:1; margin-bottom:0; font-weight:bold;">
                         <option value="BUY">🟢 買入 (BUY)</option>
@@ -226,7 +231,8 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, writeBatch, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+        // 🌟 引入 updateDoc
+        import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, writeBatch, setDoc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
         import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
 
         const firebaseConfig = {
@@ -252,16 +258,17 @@
         let lastUpdatedTime = "從未更新"; 
         
         let portfolioChart = null; 
-        let cloudStockNames = {}; // 🌟 確保變數存在，防止 undefined
+        let cloudStockNames = {}; 
+        
+        // 🌟 儲存目前正在修改哪一筆交易的 ID (如果是 null，代表是新增交易)
+        let editingTxnId = null;
 
-        // 🌟 強化版智能名稱轉換器 (防禦式編程)
         function getDisplayName(rawSymbol) {
             if (!rawSymbol) return "未知股票";
             let cleanSymbol = rawSymbol.split(' ')[0]; 
             if (cleanSymbol.startsWith('HKG:')) {
                 cleanSymbol = cleanSymbol.replace('HKG:', '') + '.HK';
             }
-            // 防禦：確保 cloudStockNames 不是 undefined，並且包含該股票
             if (cloudStockNames && cloudStockNames[cleanSymbol]) {
                 return `${cleanSymbol} ${cloudStockNames[cleanSymbol]}`;
             }
@@ -294,7 +301,6 @@
             }
         });
 
-        // --- 戶口與全域設定管理 ---
         async function fetchUserConfig() {
             const docRef = doc(db, "users", currentUser.uid);
             const docSnap = await getDoc(docRef);
@@ -357,7 +363,6 @@
             }
         };
 
-        // --- 報價與交易記錄 ---
         async function fetchYahooQuote(query) {
             let ticker = query.toUpperCase();
             if (/^\d{1,4}$/.test(ticker)) ticker = ticker.padStart(4, '0') + '.HK';
@@ -389,7 +394,6 @@
                     symbolInput.value = `${stockData.symbol} ${stockData.name}`; 
                     priceInput.value = stockData.price;
                     nameDisplay.style.color = "#00E676"; nameDisplay.innerText = "✅ 成功獲取現價"; 
-                    // 前端抓到新名字，也即時更新字典
                     cloudStockNames[stockData.symbol] = stockData.name;
                     updateAvailableSharesHint(); 
                 } else { nameDisplay.style.color = "#FF1744"; nameDisplay.innerText = "❌ 找不到代號"; }
@@ -408,22 +412,15 @@
                     const stockData = await fetchYahooQuote(ticker);
                     if (stockData && stockData.price) { 
                         marketPrices[symbolStr] = stockData.price; 
-                        cloudStockNames[ticker] = stockData.name; // 同步更新字典
+                        cloudStockNames[ticker] = stockData.name;
                         updatedCount++; 
                     }
                 } catch (error) {}
             }
             if (updatedCount > 0) {
                 const now = new Date(); 
-                // 統一日期的顯示格式，與 Python 後台相似
                 lastUpdatedTime = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')} (手動更新)`;
-                
-                await setDoc(doc(db, "users", currentUser.uid), { 
-                    marketPrices: marketPrices, 
-                    stockNames: cloudStockNames,
-                    lastUpdatedTime: lastUpdatedTime 
-                }, { merge: true });
-                
+                await setDoc(doc(db, "users", currentUser.uid), { marketPrices: marketPrices, stockNames: cloudStockNames, lastUpdatedTime: lastUpdatedTime }, { merge: true });
                 document.getElementById('last-updated-time').innerText = `最後更新: ${lastUpdatedTime}`;
                 renderDashboard(); alert(`✅ 成功更新 ${updatedCount} 隻股票！`);
             } else { alert("⚠️ 更新失敗"); }
@@ -436,7 +433,15 @@
             const account = document.getElementById('input-account').value; const symbol = document.getElementById('input-symbol').value.trim();
             if (symbol === "") { hint.style.display = 'none'; return; }
             let currentShares = 0;
-            transactions.forEach(t => { if (t.account === account && t.symbol === symbol) { if (t.type === 'BUY') currentShares += t.shares; else if (t.type === 'SELL') currentShares -= t.shares; } });
+            transactions.forEach(t => { 
+                // 🌟 修正：修改模式下，不將自己這筆交易計算入可用股數，以免自己阻礙自己賣出
+                if (t.id === editingTxnId) return; 
+                
+                if (t.account === account && t.symbol === symbol) { 
+                    if (t.type === 'BUY') currentShares += t.shares; 
+                    else if (t.type === 'SELL') currentShares -= t.shares; 
+                } 
+            });
             hint.innerText = `此戶口可賣: ${Math.max(0, currentShares)} 股`; hint.style.display = 'block'; hint.style.color = currentShares > 0 ? '#00E676' : '#FF1744';
         }
 
@@ -449,24 +454,57 @@
             transactions.sort((a, b) => new Date(a.date) - new Date(b.date)); renderDashboard();
         }
 
+        // 🌟 新增/修改 共用儲存邏輯
         document.getElementById('btn-save').addEventListener('click', async () => {
             if (!currentUser) return;
-            const btn = document.getElementById('btn-save'); btn.innerText = "上傳中..."; btn.disabled = true;
+            const btn = document.getElementById('btn-save'); 
+            btn.innerText = "上傳中..."; btn.disabled = true;
+            
             const symbol = document.getElementById('input-symbol').value.trim();
             const currentMarketPrice = parseFloat(document.getElementById('input-current-market-price').value);
+            
             const newTxn = {
-                type: document.getElementById('input-type').value, date: document.getElementById('input-date').value, account: document.getElementById('input-account').value,
-                symbol: symbol, shares: parseFloat(document.getElementById('input-shares').value), price: parseFloat(document.getElementById('input-price').value), fee: parseFloat(document.getElementById('input-fee').value) || 0, timestamp: new Date().getTime()
+                type: document.getElementById('input-type').value, 
+                date: document.getElementById('input-date').value, 
+                account: document.getElementById('input-account').value,
+                symbol: symbol, 
+                shares: parseFloat(document.getElementById('input-shares').value), 
+                price: parseFloat(document.getElementById('input-price').value), 
+                fee: parseFloat(document.getElementById('input-fee').value) || 0, 
+                timestamp: new Date().getTime() // 為了簡單起見，修改時時間戳更新為當下
             };
-            if(!newTxn.symbol || isNaN(newTxn.shares) || isNaN(newTxn.price) || !newTxn.date) { alert("請填寫完整！"); btn.innerText = "記錄交易"; btn.disabled = false; return; }
+            
+            if(!newTxn.symbol || isNaN(newTxn.shares) || isNaN(newTxn.price) || !newTxn.date) { 
+                alert("請填寫完整日期、股數及成交價！"); btn.innerText = editingTxnId ? "儲存修改" : "記錄交易"; btn.disabled = false; return; 
+            }
+            
             try {
-                const docRef = await addDoc(collection(db, "users", currentUser.uid, "transactions"), newTxn);
-                transactions.push({ id: docRef.id, ...newTxn }); transactions.sort((a, b) => new Date(a.date) - new Date(b.date));
-                if (!isNaN(currentMarketPrice)) { marketPrices[symbol] = currentMarketPrice; await setDoc(doc(db, "users", currentUser.uid), { marketPrices: marketPrices }, { merge: true }); }
-                renderDashboard(); document.getElementById('add-modal').style.display = 'none'; document.getElementById('validated-name').innerText = ''; 
-                ['input-symbol','input-shares','input-price','input-fee','input-current-market-price'].forEach(id => document.getElementById(id).value = '');
-            } catch (error) { alert("記錄失敗：" + error.message); }
-            btn.innerText = "記錄交易"; btn.disabled = false;
+                if (editingTxnId) {
+                    // 🌟 執行更新 Update
+                    await updateDoc(doc(db, "users", currentUser.uid, "transactions", editingTxnId), newTxn);
+                    const index = transactions.findIndex(t => t.id === editingTxnId);
+                    transactions[index] = { id: editingTxnId, ...newTxn };
+                    alert("✅ 修改成功！");
+                } else {
+                    // 🌟 執行新增 Create
+                    const docRef = await addDoc(collection(db, "users", currentUser.uid, "transactions"), newTxn);
+                    transactions.push({ id: docRef.id, ...newTxn });
+                }
+                
+                transactions.sort((a, b) => new Date(a.date) - new Date(b.date));
+                if (!isNaN(currentMarketPrice)) { 
+                    marketPrices[symbol] = currentMarketPrice; 
+                    await setDoc(doc(db, "users", currentUser.uid), { marketPrices: marketPrices }, { merge: true }); 
+                }
+                
+                renderDashboard(); 
+                document.getElementById('add-modal').style.display = 'none'; 
+                document.getElementById('validated-name').innerText = ''; 
+                editingTxnId = null; // 處理完成後清空 ID
+            } catch (error) { 
+                alert("記錄失敗：" + error.message); 
+            }
+            btn.disabled = false;
         });
 
         function calculateHoldings() {
@@ -492,11 +530,7 @@
             chartSection.style.display = 'block';
             
             const labels = []; const dataValues = []; 
-            // 🌟 擴充顏色庫，防止股票多過 9 隻時圖表變黑
-            const bgColors = [
-                '#007AFF', '#00E676', '#FFD700', '#FF1744', '#9966FF', '#4DA8DA', '#FF9F40', '#8A2BE2', '#DC143C', 
-                '#00CED1', '#FF69B4', '#32CD32', '#FFA500', '#6A5ACD', '#20B2AA', '#FF4500', '#DDA0DD', '#00FA9A'
-            ];
+            const bgColors = ['#007AFF', '#00E676', '#FFD700', '#FF1744', '#9966FF', '#4DA8DA', '#FF9F40', '#8A2BE2', '#DC143C', '#00CED1', '#FF69B4', '#32CD32', '#FFA500', '#6A5ACD', '#20B2AA', '#FF4500', '#DDA0DD', '#00FA9A'];
             
             let aggregatedHoldings = {};
             activeHoldings.forEach(stock => {
@@ -579,14 +613,48 @@
             const txns = transactions.filter(t => t.account === account && t.symbol === symbol).reverse();
             txns.forEach(t => {
                 let typeStr = t.type === 'BUY' ? '買入' : '賣出'; let typeClass = t.type === 'BUY' ? 'type-buy' : 'type-sell';
-                container.innerHTML += `<div class="history-item"><div class="history-detail"><span class="${typeClass}">[${typeStr}]</span> ${t.date}<p>成交: ${t.shares}股 @ $${t.price}</p>${t.fee > 0 ? `<p>手續費: $${t.fee}</p>` : ''}</div><button class="history-delete" onclick="deleteTransaction('${t.id}')">🗑️</button></div>`;
+                container.innerHTML += `
+                    <div class="history-item">
+                        <div class="history-detail">
+                            <span class="${typeClass}">[${typeStr}]</span> ${t.date}
+                            <p>成交: ${t.shares}股 @ $${t.price}</p>
+                            ${t.fee > 0 ? `<p>手續費: $${t.fee}</p>` : ''}
+                        </div>
+                        <div class="history-actions">
+                            <button class="history-edit" onclick="openEditTransaction('${t.id}')" title="修改此紀錄">✏️</button>
+                            <button class="history-delete" onclick="deleteTransaction('${t.id}')" title="刪除此紀錄">🗑️</button>
+                        </div>
+                    </div>`;
             });
             document.getElementById('history-modal').style.display = 'flex';
         };
 
+        // 🌟 新增的「打開修改視窗」功能
+        window.openEditTransaction = function(docId) {
+            const txn = transactions.find(t => t.id === docId);
+            if (!txn) return;
+            
+            editingTxnId = docId;
+            document.getElementById('input-type').value = txn.type;
+            document.getElementById('input-date').value = txn.date;
+            document.getElementById('input-account').value = txn.account;
+            // 讀取時，還原全名方便使用者觀看
+            document.getElementById('input-symbol').value = getDisplayName(txn.symbol);
+            document.getElementById('input-shares').value = txn.shares;
+            document.getElementById('input-price').value = txn.price;
+            document.getElementById('input-fee').value = txn.fee || 0;
+            
+            // 將按鈕與標題變成「修改」狀態
+            document.getElementById('transaction-modal-title').innerText = "✏️ 修改交易紀錄";
+            document.getElementById('btn-save').innerText = "儲存修改";
+            
+            document.getElementById('history-modal').style.display = 'none';
+            document.getElementById('add-modal').style.display = 'flex';
+            updateAvailableSharesHint();
+        };
+
         window.deleteTransaction = async function(docId) { if(confirm("確定刪除這筆交易紀錄？這會重新計算您的持倉與成本！")) { await deleteDoc(doc(db, "users", currentUser.uid, "transactions", docId)); transactions = transactions.filter(t => t.id !== docId); document.getElementById('history-modal').style.display = 'none'; renderDashboard(); } };
 
-        // CSV 匯出/匯入 (支援 HKG: 格式轉換)
         window.exportCSV = function() {
             if (transactions.length === 0) { alert("沒有交易紀錄可供匯出！"); return; }
             let csvContent = "\uFEFFDate,Type,Account,Symbol,Shares,Price,Fee\n";
@@ -622,7 +690,21 @@
         });
 
         window.switchTab = function(tab) { currentTab = tab; renderTabs(); renderDashboard(); };
-        document.getElementById('add-btn').addEventListener('click', () => { document.getElementById('add-modal').style.display = 'flex'; updateAvailableSharesHint(); });
+        
+        // 🌟 主頁 + 號按鈕，重置為「新增」狀態
+        document.getElementById('add-btn').addEventListener('click', () => { 
+            editingTxnId = null; // 清除 ID 代表新增模式
+            document.getElementById('transaction-modal-title').innerText = "新增交易紀錄";
+            document.getElementById('btn-save').innerText = "記錄交易";
+            
+            ['input-symbol','input-shares','input-price','input-fee','input-current-market-price'].forEach(id => document.getElementById(id).value = '');
+            document.getElementById('validated-name').innerText = ''; 
+            document.getElementById('input-date').valueAsDate = new Date();
+            
+            document.getElementById('add-modal').style.display = 'flex'; 
+            updateAvailableSharesHint(); 
+        });
+        
         document.getElementById('toggle-visibility').addEventListener('click', function() { isHidden = !isHidden; this.innerText = isHidden ? '🙈' : '👁️'; if(isHidden) { document.getElementById('total-asset').innerText = '********'; document.getElementById('daily-pl').innerText = '****'; document.getElementById('daily-pl').className = 'daily-pl'; document.getElementById('chart-section').style.display = 'none'; } else { renderDashboard(); } });
     </script>
 </body>
