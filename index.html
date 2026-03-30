@@ -46,7 +46,7 @@
         .tab.active { background-color: #007AFF; color: white; font-weight: bold; }
         .tab-manage { background-color: #555; }
 
-        /* --- 🌟 圖表容器 --- */
+        /* --- 圖表容器 --- */
         .chart-wrapper { background-color: #1e1e1e; margin: 20px; padding: 20px; border-radius: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); display: none; }
         .chart-title { text-align: center; font-size: 0.9rem; color: #aaa; margin-top: 0; margin-bottom: 15px; font-weight: bold;}
 
@@ -250,28 +250,27 @@
         let currentTab = '全部';
         let isHidden = false;
         let lastUpdatedTime = "從未更新"; 
+        
         let portfolioChart = null; 
-        let cloudStockNames = {}; // 🌟 新增：用來接收雲端自動化字典
+        let cloudStockNames = {}; // 🌟 確保變數存在，防止 undefined
 
-       // 🌟 智能名稱轉換器 (自動讀取雲端機器人抓取的名稱)
+        // 🌟 強化版智能名稱轉換器 (防禦式編程)
         function getDisplayName(rawSymbol) {
+            if (!rawSymbol) return "未知股票";
             let cleanSymbol = rawSymbol.split(' ')[0]; 
             if (cleanSymbol.startsWith('HKG:')) {
                 cleanSymbol = cleanSymbol.replace('HKG:', '') + '.HK';
             }
-            
-            // 優先使用 GitHub 機器人抓取的名字
-            if (cloudStockNames[cleanSymbol]) {
-                // 如果個名太長，可以考慮截斷，不過通常 Yahoo 的 shortName 啱啱好
+            // 防禦：確保 cloudStockNames 不是 undefined，並且包含該股票
+            if (cloudStockNames && cloudStockNames[cleanSymbol]) {
                 return `${cleanSymbol} ${cloudStockNames[cleanSymbol]}`;
             }
-            // 如果雲端未有記錄，就顯示原本代號
-            return rawSymbol; 
+            return cleanSymbol; 
         }
 
         document.getElementById('input-date').valueAsDate = new Date();
 
-        // 登入控制
+        // --- 登入控制 ---
         document.getElementById('switch-auth-mode').addEventListener('click', () => {
             const isLogin = document.getElementById('login-btn').classList.contains('hidden');
             document.getElementById('login-btn').classList.toggle('hidden', isLogin);
@@ -295,21 +294,22 @@
             }
         });
 
-       async function fetchUserConfig() {
+        // --- 戶口與全域設定管理 ---
+        async function fetchUserConfig() {
             const docRef = doc(db, "users", currentUser.uid);
             const docSnap = await getDoc(docRef);
             if (docSnap.exists()) {
-                if (docSnap.data().accounts) myAccounts = docSnap.data().accounts;
-                if (docSnap.data().marketPrices) marketPrices = docSnap.data().marketPrices;
-                
-                // 🌟 下載雲端智能字典
-                if (docSnap.data().stockNames) cloudStockNames = docSnap.data().stockNames; 
-                
-                if (docSnap.data().lastUpdatedTime) { 
-                    lastUpdatedTime = docSnap.data().lastUpdatedTime; 
+                const data = docSnap.data();
+                if (data.accounts) myAccounts = data.accounts;
+                if (data.marketPrices) marketPrices = data.marketPrices;
+                if (data.stockNames) cloudStockNames = data.stockNames; 
+                if (data.lastUpdatedTime) { 
+                    lastUpdatedTime = data.lastUpdatedTime; 
                     document.getElementById('last-updated-time').innerText = `最後更新: ${lastUpdatedTime}`; 
                 }
-            } else { await setDoc(docRef, { accounts: myAccounts }, { merge: true }); }
+            } else { 
+                await setDoc(docRef, { accounts: myAccounts, stockNames: {} }, { merge: true }); 
+            }
             renderTabs();
         }
 
@@ -357,12 +357,13 @@
             }
         };
 
+        // --- 報價與交易記錄 ---
         async function fetchYahooQuote(query) {
             let ticker = query.toUpperCase();
             if (/^\d{1,4}$/.test(ticker)) ticker = ticker.padStart(4, '0') + '.HK';
             else if (ticker.startsWith('HKG:')) ticker = ticker.replace('HKG:', '') + '.HK';
             
-            const yfUrl = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${ticker}`;
+            const yfUrl = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${ticker}`;
             const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(yfUrl)}`;
             const response = await fetch(proxyUrl);
             if (!response.ok) throw new Error('Network error');
@@ -387,7 +388,10 @@
                 if (stockData) {
                     symbolInput.value = `${stockData.symbol} ${stockData.name}`; 
                     priceInput.value = stockData.price;
-                    nameDisplay.style.color = "#00E676"; nameDisplay.innerText = "✅ 成功獲取現價"; updateAvailableSharesHint(); 
+                    nameDisplay.style.color = "#00E676"; nameDisplay.innerText = "✅ 成功獲取現價"; 
+                    // 前端抓到新名字，也即時更新字典
+                    cloudStockNames[stockData.symbol] = stockData.name;
+                    updateAvailableSharesHint(); 
                 } else { nameDisplay.style.color = "#FF1744"; nameDisplay.innerText = "❌ 找不到代號"; }
             } catch (error) { nameDisplay.style.color = "#FF1744"; nameDisplay.innerText = "❌ 網絡錯誤"; }
             btn.innerText = "🔍 即時價";
@@ -402,12 +406,24 @@
                 try {
                     let ticker = symbolStr.split(' ')[0]; 
                     const stockData = await fetchYahooQuote(ticker);
-                    if (stockData && stockData.price) { marketPrices[symbolStr] = stockData.price; updatedCount++; }
+                    if (stockData && stockData.price) { 
+                        marketPrices[symbolStr] = stockData.price; 
+                        cloudStockNames[ticker] = stockData.name; // 同步更新字典
+                        updatedCount++; 
+                    }
                 } catch (error) {}
             }
             if (updatedCount > 0) {
-                const now = new Date(); lastUpdatedTime = now.toLocaleString('zh-HK', { hour12: false });
-                await setDoc(doc(db, "users", currentUser.uid), { marketPrices: marketPrices, lastUpdatedTime: lastUpdatedTime }, { merge: true });
+                const now = new Date(); 
+                // 統一日期的顯示格式，與 Python 後台相似
+                lastUpdatedTime = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')} (手動更新)`;
+                
+                await setDoc(doc(db, "users", currentUser.uid), { 
+                    marketPrices: marketPrices, 
+                    stockNames: cloudStockNames,
+                    lastUpdatedTime: lastUpdatedTime 
+                }, { merge: true });
+                
                 document.getElementById('last-updated-time').innerText = `最後更新: ${lastUpdatedTime}`;
                 renderDashboard(); alert(`✅ 成功更新 ${updatedCount} 隻股票！`);
             } else { alert("⚠️ 更新失敗"); }
@@ -474,12 +490,18 @@
             const chartSection = document.getElementById('chart-section'); const ctx = document.getElementById('portfolioChart').getContext('2d');
             if (isHidden || activeHoldings.length === 0) { chartSection.style.display = 'none'; return; }
             chartSection.style.display = 'block';
-            const labels = []; const dataValues = []; const bgColors = ['#007AFF', '#00E676', '#FFD700', '#FF1744', '#9966FF', '#4DA8DA', '#FF9F40', '#8A2BE2', '#DC143C'];
+            
+            const labels = []; const dataValues = []; 
+            // 🌟 擴充顏色庫，防止股票多過 9 隻時圖表變黑
+            const bgColors = [
+                '#007AFF', '#00E676', '#FFD700', '#FF1744', '#9966FF', '#4DA8DA', '#FF9F40', '#8A2BE2', '#DC143C', 
+                '#00CED1', '#FF69B4', '#32CD32', '#FFA500', '#6A5ACD', '#20B2AA', '#FF4500', '#DDA0DD', '#00FA9A'
+            ];
+            
             let aggregatedHoldings = {};
             activeHoldings.forEach(stock => {
                 let currentPrice = marketPrices[stock.symbol] || (stock.totalCost / stock.shares); 
                 let currentVal = stock.shares * currentPrice; 
-                // 🌟 圖表使用智能名稱轉換
                 let niceName = getDisplayName(stock.symbol);
                 if (aggregatedHoldings[niceName]) aggregatedHoldings[niceName] += currentVal; else aggregatedHoldings[niceName] = currentVal;
             });
@@ -506,9 +528,7 @@
                     let currentVal = stock.shares * currentPrice; let pl = currentVal - stock.totalCost; let realizedPL = stock.realizedPL || 0;
                     totalVal += currentVal; totalCost += stock.totalCost;
                     
-                    // 🌟 列表使用智能名稱轉換
                     let niceName = getDisplayName(stock.symbol);
-                    
                     let tagsHtml = pl >= 0 ? '<div class="tag tag-green">持倉盈</div>' : '<div class="tag tag-red">持倉虧</div>';
                     if (realizedPL !== 0) tagsHtml += `<div class="tag" style="background:#444; color:#ccc;">已實現: ${realizedPL>0?'+':''}${realizedPL.toFixed(2)}</div>`;
 
@@ -566,6 +586,7 @@
 
         window.deleteTransaction = async function(docId) { if(confirm("確定刪除這筆交易紀錄？這會重新計算您的持倉與成本！")) { await deleteDoc(doc(db, "users", currentUser.uid, "transactions", docId)); transactions = transactions.filter(t => t.id !== docId); document.getElementById('history-modal').style.display = 'none'; renderDashboard(); } };
 
+        // CSV 匯出/匯入 (支援 HKG: 格式轉換)
         window.exportCSV = function() {
             if (transactions.length === 0) { alert("沒有交易紀錄可供匯出！"); return; }
             let csvContent = "\uFEFFDate,Type,Account,Symbol,Shares,Price,Fee\n";
