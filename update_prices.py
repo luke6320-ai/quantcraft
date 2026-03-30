@@ -1,17 +1,22 @@
 import firebase_admin
 from firebase_admin import credentials, firestore
 import yfinance as yf
-import json
 import os
+import json
 from datetime import datetime
 import pytz
 
 # 1. 讀取 GitHub Secret 裡面的 Firebase 管理員鎖匙
-cert_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT")
-if not cert_json:
+cert_json_str = os.environ.get("FIREBASE_SERVICE_ACCOUNT")
+if not cert_json_str:
     raise ValueError("找不到 FIREBASE_SERVICE_ACCOUNT 鎖匙！")
 
-cred = credentials.Certificate(json.loads(cert_json))
+# 🌟 終極防彈寫法：將鎖匙寫入實體檔案，完美避開格式報錯
+with open("firebase_key.json", "w", encoding="utf-8") as f:
+    f.write(cert_json_str)
+
+# 使用實體檔案登入 Firebase
+cred = credentials.Certificate("firebase_key.json")
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
@@ -35,13 +40,11 @@ for doc in docs:
     
     print(f"正在更新用戶: {doc.id} 的報價...")
     for symbol_str, old_price in market_prices.items():
-        # 從 "0700.HK 騰訊" 中提取 "0700.HK"
         ticker = symbol_str.split(' ')[0] 
         if ticker.startswith('HKG:'):
             ticker = ticker.replace('HKG:', '') + '.HK'
             
         try:
-            # 向 Yahoo Finance 獲取最新收市價
             stock = yf.Ticker(ticker)
             hist = stock.history(period="1d")
             
