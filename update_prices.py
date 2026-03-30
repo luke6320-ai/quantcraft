@@ -1,6 +1,6 @@
 import firebase_admin
 from firebase_admin import credentials, firestore
-import yfinance as yf
+import requests
 import os
 import json
 from datetime import datetime
@@ -26,22 +26,22 @@ update_time = datetime.now(hk_tz).strftime('%Y-%m-%d %H:%M:%S (自動更新)')
 users_ref = db.collection("users")
 docs = users_ref.stream()
 
+# 🌟 偽裝成普通瀏覽器，完美繞過 Yahoo 封鎖
+headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+}
+
 for doc in docs:
     user_data = doc.to_dict()
-    if not user_data:
-        continue
+    if not user_data: continue
         
-    # 🌟 防彈衣：強制檢查並轉換，拒絕 NoneType 攻擊
     market_prices = user_data.get("marketPrices")
-    if not isinstance(market_prices, dict):
-        market_prices = {}
+    if not isinstance(market_prices, dict): market_prices = {}
         
     stock_names = user_data.get("stockNames")
-    if not isinstance(stock_names, dict):
-        stock_names = {}
+    if not isinstance(stock_names, dict): stock_names = {}
     
     if not market_prices:
-        print(f"用戶 {doc.id} 沒有持倉數據，跳過。")
         continue
     
     updated_prices = {}
@@ -50,38 +50,40 @@ for doc in docs:
     
     print(f"正在更新用戶: {doc.id} 的報價與名稱...")
     for symbol_str, old_price in market_prices.items():
-        # 再次防彈：確保 symbol 係字串
-        if not isinstance(symbol_str, str):
-            continue
+        if not isinstance(symbol_str, str): continue
             
         ticker = symbol_str.split(' ')[0] 
         if ticker.startswith('HKG:'):
             ticker = ticker.replace('HKG:', '') + '.HK'
             
         try:
-            stock = yf.Ticker(ticker)
+            # 🌟 放棄 yfinance，直接呼叫 Yahoo 原生 API 獲取名稱與價錢
+            url = f"https://query2.finance.yahoo.com/v7/finance/quote?symbols={ticker}"
+            response = requests.get(url, headers=headers, timeout=10)
+            data = response.json()
             
-            # 獲取最新價錢
-            hist = stock.history(period="1d")
-            if not hist.empty:
-                latest_price = float(hist['Close'].iloc[-1])
-            else:
-                latest_price = float(stock.fast_info.get('lastPrice', old_price or 0))
+            result = data.get('quoteResponse', {}).get('result', [])
+            
+            if result:
+                quote = result[0]
+                latest_price = quote.get('regularMarketPrice', old_price)
                 
-            # 獲取官方股票名稱
-            info = stock.info
-            company_name = info.get('shortName') or info.get('longName') or ticker
-            
-            updated_prices[symbol_str] = round(latest_price, 2)
-            updated_names[ticker] = company_name 
-            
-            updated_count += 1
-            print(f"  - {ticker} ({company_name}) 更新成功: ${latest_price:.2f}")
+                # 🌟 完美提取官方名稱 (例如: 騰訊控股)
+                company_name = quote.get('shortName') or quote.get('longName') or ticker
+                
+                updated_prices[symbol_str] = round(latest_price, 2)
+                updated_names[ticker] = company_name 
+                
+                updated_count += 1
+                print(f"  - {ticker} ({company_name}) 更新成功: ${latest_price:.2f}")
+            else:
+                raise ValueError("API 回傳空數據")
+                
         except Exception as e:
             print(f"  - {ticker} 更新失敗 ({e})，保留舊資料")
             updated_prices[symbol_str] = old_price
             
-    # 4. 將最新價格、名稱字典與時間寫回 Firebase
+    # 4. 寫回 Firebase
     doc.reference.update({
         "marketPrices": updated_prices,
         "stockNames": updated_names, 
