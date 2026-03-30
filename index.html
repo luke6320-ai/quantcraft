@@ -251,44 +251,22 @@
         let isHidden = false;
         let lastUpdatedTime = "從未更新"; 
         let portfolioChart = null; 
+        let cloudStockNames = {}; // 🌟 新增：用來接收雲端自動化字典
 
-        // ==========================================
-        // 🌟 你的專屬本地股票 Database (隨時可以自己加！)
-        // ==========================================
-        const STOCK_DB = {
-            "0005.HK": "匯豐控股",
-            "0700.HK": "騰訊控股",
-            "9988.HK": "阿里巴巴",
-            "3690.HK": "美團",
-            "0941.HK": "中國移動",
-            "0388.HK": "港交所",
-            "1299.HK": "友邦保險",
-            "0001.HK": "長和",
-            "0011.HK": "恒生銀行",
-            "0883.HK": "中國海洋石油",
-            "0066.HK": "港鐵公司",
-            "1810.HK": "小米集團",
-            "BABA": "阿里巴巴 (美)",
-            "AAPL": "蘋果公司",
-            "MSFT": "微軟",
-            "TSLA": "Tesla",
-            "NVDA": "英偉達 (Nvidia)",
-            "META": "Meta (Facebook)",
-            "GOOGL": "Google",
-            "AMZN": "亞馬遜"
-        };
-
-        // 🌟 智能名稱轉換器 (負責將代號變成靚靚中文)
+       // 🌟 智能名稱轉換器 (自動讀取雲端機器人抓取的名稱)
         function getDisplayName(rawSymbol) {
-            let cleanSymbol = rawSymbol.split(' ')[0]; // 抽取前面的代號，例如 "0700.HK"
+            let cleanSymbol = rawSymbol.split(' ')[0]; 
             if (cleanSymbol.startsWith('HKG:')) {
                 cleanSymbol = cleanSymbol.replace('HKG:', '') + '.HK';
             }
-            // 如果 Database 有記錄，就出中文名；如果冇，就直接出代號
-            if (STOCK_DB[cleanSymbol]) {
-                return `${cleanSymbol} ${STOCK_DB[cleanSymbol]}`;
+            
+            // 優先使用 GitHub 機器人抓取的名字
+            if (cloudStockNames[cleanSymbol]) {
+                // 如果個名太長，可以考慮截斷，不過通常 Yahoo 的 shortName 啱啱好
+                return `${cleanSymbol} ${cloudStockNames[cleanSymbol]}`;
             }
-            return cleanSymbol; 
+            // 如果雲端未有記錄，就顯示原本代號
+            return rawSymbol; 
         }
 
         document.getElementById('input-date').valueAsDate = new Date();
@@ -317,13 +295,20 @@
             }
         });
 
-        async function fetchUserConfig() {
+       async function fetchUserConfig() {
             const docRef = doc(db, "users", currentUser.uid);
             const docSnap = await getDoc(docRef);
             if (docSnap.exists()) {
                 if (docSnap.data().accounts) myAccounts = docSnap.data().accounts;
                 if (docSnap.data().marketPrices) marketPrices = docSnap.data().marketPrices;
-                if (docSnap.data().lastUpdatedTime) { lastUpdatedTime = docSnap.data().lastUpdatedTime; document.getElementById('last-updated-time').innerText = `最後更新: ${lastUpdatedTime}`; }
+                
+                // 🌟 下載雲端智能字典
+                if (docSnap.data().stockNames) cloudStockNames = docSnap.data().stockNames; 
+                
+                if (docSnap.data().lastUpdatedTime) { 
+                    lastUpdatedTime = docSnap.data().lastUpdatedTime; 
+                    document.getElementById('last-updated-time').innerText = `最後更新: ${lastUpdatedTime}`; 
+                }
             } else { await setDoc(docRef, { accounts: myAccounts }, { merge: true }); }
             renderTabs();
         }
