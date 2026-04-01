@@ -6,7 +6,7 @@
     <title>QuantCraft HK - 專業交易帳本</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        /* --- 基礎與全局設定 (PC 置中優化) --- */
+        /* --- 基礎與全局設定 --- */
         body { margin: 0 auto; padding: 0; background-color: #121212; color: #ffffff; font-family: sans-serif; max-width: 500px; min-height: 100vh; box-shadow: 0 0 20px rgba(0,0,0,0.8); position: relative; overflow-x: hidden;}
         .hidden { display: none !important; }
         
@@ -50,9 +50,12 @@
         .chart-wrapper { background-color: #1e1e1e; margin: 20px; padding: 20px; border-radius: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); display: none; }
         .chart-title { text-align: center; font-size: 0.9rem; color: #aaa; margin-top: 0; margin-bottom: 15px; font-weight: bold;}
 
-        /* --- 列表 --- */
+        /* --- 列表與排序 --- */
         .section-container { padding: 0 20px 20px 20px; flex: 1;}
-        .section-title { font-size: 1.1rem; font-weight: bold; margin-bottom: 15px; color: #eeeeee; }
+        .section-title { font-size: 1.1rem; font-weight: bold; color: #eeeeee; margin: 0;}
+        .list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        #sort-holdings { background: #333; color: #ccc; border: none; padding: 5px 10px; border-radius: 8px; font-size: 0.8rem; outline: none; cursor: pointer;}
+        
         .list-row { background-color: #1e1e1e; padding: 15px; border-radius: 15px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; cursor: pointer; border: 1px solid transparent; transition: border 0.2s;}
         .list-row:hover { border: 1px solid #555; }
         .row-info h4 { margin: 0; font-size: 1.1rem; }
@@ -91,16 +94,16 @@
         .btn-edit { background: #FFD700; color: #000; margin-right: 5px;}
         .btn-delete { background: #FF1744; color: white; }
 
-        .history-item { padding: 10px 0; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center;}
+        /* 🌟 修復與美化歷史紀錄項目 */
+        .history-item { padding: 12px 0; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center;}
         .history-item:last-child { border-bottom: none; }
         .type-buy { color: #00E676; font-weight: bold; }
         .type-sell { color: #FF1744; font-weight: bold; }
-        .history-detail p { margin: 2px 0; font-size: 0.85rem; color: #bbb;}
+        .history-detail p { margin: 4px 0 0 0; font-size: 0.85rem; color: #bbb;}
         
-        /* 🌟 歷史紀錄的修改與刪除按鈕 */
-        .history-actions { display: flex; gap: 10px; }
-        .history-edit { background: none; border: none; color: #FFD700; cursor: pointer; font-size: 1.2rem;}
-        .history-delete { background: none; border: none; color: #555; cursor: pointer; font-size: 1.2rem;}
+        .history-actions { display: flex; gap: 15px; }
+        .history-edit { background: none; border: none; color: #FFD700; cursor: pointer; font-size: 1.3rem; padding: 0;}
+        .history-delete { background: none; border: none; color: #888; cursor: pointer; font-size: 1.3rem; padding: 0;}
         .history-edit:hover { color: #fff; }
         .history-delete:hover { color: #FF1744; }
         
@@ -154,8 +157,20 @@
                 <canvas id="portfolioChart"></canvas>
             </div>
 
-            <div class="section-container" id="holdings-list">
-                <div style="text-align:center; color:#888;">載入中...</div>
+            <div class="section-container">
+                <div class="list-header">
+                    <div class="section-title" id="holdings-title">全部 持倉</div>
+                    <select id="sort-holdings" onchange="renderDashboard()">
+                        <option value="recent">排序: 最新交易</option>
+                        <option value="pl-desc">排序: 利潤最高</option>
+                        <option value="pl-asc">排序: 虧損最多</option>
+                        <option value="name">排序: 代號 A-Z</option>
+                    </select>
+                </div>
+                
+                <div id="holdings-list">
+                    <div style="text-align:center; color:#888;">載入中...</div>
+                </div>
             </div>
         </div>
 
@@ -231,7 +246,6 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
-        // 🌟 引入 updateDoc
         import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, writeBatch, setDoc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
         import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
 
@@ -259,16 +273,13 @@
         
         let portfolioChart = null; 
         let cloudStockNames = {}; 
-        
-        // 🌟 儲存目前正在修改哪一筆交易的 ID (如果是 null，代表是新增交易)
         let editingTxnId = null;
 
+        // 🌟 智能名稱轉換器
         function getDisplayName(rawSymbol) {
             if (!rawSymbol) return "未知股票";
             let cleanSymbol = rawSymbol.split(' ')[0]; 
-            if (cleanSymbol.startsWith('HKG:')) {
-                cleanSymbol = cleanSymbol.replace('HKG:', '') + '.HK';
-            }
+            if (cleanSymbol.startsWith('HKG:')) { cleanSymbol = cleanSymbol.replace('HKG:', '') + '.HK'; }
             if (cloudStockNames && cloudStockNames[cleanSymbol]) {
                 return `${cleanSymbol} ${cloudStockNames[cleanSymbol]}`;
             }
@@ -301,6 +312,7 @@
             }
         });
 
+        // --- 戶口與全域設定管理 ---
         async function fetchUserConfig() {
             const docRef = doc(db, "users", currentUser.uid);
             const docSnap = await getDoc(docRef);
@@ -363,6 +375,7 @@
             }
         };
 
+        // --- 報價與交易記錄 ---
         async function fetchYahooQuote(query) {
             let ticker = query.toUpperCase();
             if (/^\d{1,4}$/.test(ticker)) ticker = ticker.padStart(4, '0') + '.HK';
@@ -434,9 +447,7 @@
             if (symbol === "") { hint.style.display = 'none'; return; }
             let currentShares = 0;
             transactions.forEach(t => { 
-                // 🌟 修正：修改模式下，不將自己這筆交易計算入可用股數，以免自己阻礙自己賣出
                 if (t.id === editingTxnId) return; 
-                
                 if (t.account === account && t.symbol === symbol) { 
                     if (t.type === 'BUY') currentShares += t.shares; 
                     else if (t.type === 'SELL') currentShares -= t.shares; 
@@ -454,7 +465,7 @@
             transactions.sort((a, b) => new Date(a.date) - new Date(b.date)); renderDashboard();
         }
 
-        // 🌟 新增/修改 共用儲存邏輯
+        // --- 新增/修改 共用儲存邏輯 ---
         document.getElementById('btn-save').addEventListener('click', async () => {
             if (!currentUser) return;
             const btn = document.getElementById('btn-save'); 
@@ -462,16 +473,17 @@
             
             const symbol = document.getElementById('input-symbol').value.trim();
             const currentMarketPrice = parseFloat(document.getElementById('input-current-market-price').value);
+            const txnDate = document.getElementById('input-date').value;
             
             const newTxn = {
                 type: document.getElementById('input-type').value, 
-                date: document.getElementById('input-date').value, 
+                date: txnDate, 
                 account: document.getElementById('input-account').value,
                 symbol: symbol, 
                 shares: parseFloat(document.getElementById('input-shares').value), 
                 price: parseFloat(document.getElementById('input-price').value), 
                 fee: parseFloat(document.getElementById('input-fee').value) || 0, 
-                timestamp: new Date().getTime() // 為了簡單起見，修改時時間戳更新為當下
+                timestamp: new Date(txnDate).getTime() // 確保時間戳與選擇日期一致，方便排序
             };
             
             if(!newTxn.symbol || isNaN(newTxn.shares) || isNaN(newTxn.price) || !newTxn.date) { 
@@ -480,13 +492,10 @@
             
             try {
                 if (editingTxnId) {
-                    // 🌟 執行更新 Update
                     await updateDoc(doc(db, "users", currentUser.uid, "transactions", editingTxnId), newTxn);
                     const index = transactions.findIndex(t => t.id === editingTxnId);
                     transactions[index] = { id: editingTxnId, ...newTxn };
-                    alert("✅ 修改成功！");
                 } else {
-                    // 🌟 執行新增 Create
                     const docRef = await addDoc(collection(db, "users", currentUser.uid, "transactions"), newTxn);
                     transactions.push({ id: docRef.id, ...newTxn });
                 }
@@ -500,19 +509,24 @@
                 renderDashboard(); 
                 document.getElementById('add-modal').style.display = 'none'; 
                 document.getElementById('validated-name').innerText = ''; 
-                editingTxnId = null; // 處理完成後清空 ID
+                editingTxnId = null; 
             } catch (error) { 
                 alert("記錄失敗：" + error.message); 
             }
             btn.disabled = false;
         });
 
+        // 🌟 持倉計算 (加入 LatestDate 方便排序)
         function calculateHoldings() {
             let holdingsMap = {};
             transactions.forEach(t => {
                 let key = t.account + '_' + t.symbol;
-                if (!holdingsMap[key]) holdingsMap[key] = { account: t.account, symbol: t.symbol, shares: 0, totalCost: 0, realizedPL: 0 };
+                if (!holdingsMap[key]) holdingsMap[key] = { account: t.account, symbol: t.symbol, shares: 0, totalCost: 0, realizedPL: 0, latestDate: 0 };
                 let h = holdingsMap[key];
+                
+                // 追蹤該股票最後一次交易時間
+                if (t.timestamp > h.latestDate) h.latestDate = t.timestamp;
+
                 if (t.type === 'BUY') { h.shares += t.shares; h.totalCost += (t.shares * t.price) + t.fee; } 
                 else if (t.type === 'SELL') {
                     if (h.shares > 0) {
@@ -547,11 +561,32 @@
             });
         }
 
-        function renderDashboard() {
-            const list = document.getElementById('holdings-list'); list.innerHTML = `<div class="section-title">${currentTab} 持倉</div>`;
-            let holdings = calculateHoldings(); const filtered = currentTab === '全部' ? holdings : holdings.filter(h => h.account === currentTab);
-            let activeHoldings = filtered.filter(h => h.shares > 0); let closedHoldings = filtered.filter(h => h.shares === 0);
+        window.renderDashboard = function() {
+            document.getElementById('holdings-title').innerText = `${currentTab} 持倉`;
+            const list = document.getElementById('holdings-list'); list.innerHTML = '';
+            
+            let holdings = calculateHoldings(); 
+            const filtered = currentTab === '全部' ? holdings : holdings.filter(h => h.account === currentTab);
+            let activeHoldings = filtered.filter(h => h.shares > 0); 
+            let closedHoldings = filtered.filter(h => h.shares === 0);
             let totalVal = 0, totalCost = 0;
+
+            // 🌟 處理智能排序功能
+            const sortMode = document.getElementById('sort-holdings').value;
+            const sortFunc = (a, b) => {
+                let aPrice = marketPrices[a.symbol] || (a.totalCost / a.shares) || 0;
+                let bPrice = marketPrices[b.symbol] || (b.totalCost / b.shares) || 0;
+                let aPL = (a.shares * aPrice - a.totalCost) + a.realizedPL;
+                let bPL = (b.shares * bPrice - b.totalCost) + b.realizedPL;
+                
+                if (sortMode === 'pl-desc') return bPL - aPL; // 利潤高至低
+                if (sortMode === 'pl-asc') return aPL - bPL;  // 利潤低至高
+                if (sortMode === 'name') return a.symbol.localeCompare(b.symbol); // 代號 A-Z
+                return (b.latestDate || 0) - (a.latestDate || 0); // 預設：最新交易
+            };
+
+            activeHoldings.sort(sortFunc);
+            closedHoldings.sort(sortFunc);
 
             updatePortfolioChart(activeHoldings);
 
@@ -562,14 +597,17 @@
                     let currentVal = stock.shares * currentPrice; let pl = currentVal - stock.totalCost; let realizedPL = stock.realizedPL || 0;
                     totalVal += currentVal; totalCost += stock.totalCost;
                     
-                    let niceName = getDisplayName(stock.symbol);
+                    // 🌟 主畫面只顯示代號 (簡潔版)
+                    let cleanSymbol = stock.symbol.split(' ')[0]; 
+                    if (cleanSymbol.startsWith('HKG:')) cleanSymbol = cleanSymbol.replace('HKG:', '') + '.HK';
+
                     let tagsHtml = pl >= 0 ? '<div class="tag tag-green">持倉盈</div>' : '<div class="tag tag-red">持倉虧</div>';
                     if (realizedPL !== 0) tagsHtml += `<div class="tag" style="background:#444; color:#ccc;">已實現: ${realizedPL>0?'+':''}${realizedPL.toFixed(2)}</div>`;
 
                     list.innerHTML += `
                         <div class="list-row" onclick="openStockHistory('${stock.account}', '${stock.symbol}')">
                             <div class="row-info">
-                                <h4>${niceName} <span style="font-size:0.7rem; color:#888;">(${stock.account})</span></h4>
+                                <h4>${cleanSymbol} <span style="font-size:0.7rem; color:#888;">(${stock.account})</span></h4>
                                 <p>平均成本: $${(stock.totalCost / stock.shares).toFixed(2)} | ${stock.shares}股</p>
                                 <div class="tags">${tagsHtml}</div>
                             </div>
@@ -584,12 +622,14 @@
             if (closedHoldings.length > 0) {
                 list.innerHTML += `<div class="section-title" style="margin-top:20px; color:#888; border-top:1px solid #333; padding-top:15px;">已平倉紀錄 (已實現盈虧)</div>`;
                 closedHoldings.forEach(stock => {
-                    let niceName = getDisplayName(stock.symbol);
+                    let cleanSymbol = stock.symbol.split(' ')[0]; 
+                    if (cleanSymbol.startsWith('HKG:')) cleanSymbol = cleanSymbol.replace('HKG:', '') + '.HK';
+
                     let plClass = stock.realizedPL >= 0 ? 'profit' : 'loss'; let plSign = stock.realizedPL >= 0 ? '+' : '';
                     list.innerHTML += `
                         <div class="list-row" onclick="openStockHistory('${stock.account}', '${stock.symbol}')" style="opacity:0.6;">
                             <div class="row-info">
-                                <h4>${niceName} <span style="font-size:0.7rem;">(${stock.account})</span></h4>
+                                <h4>${cleanSymbol} <span style="font-size:0.7rem;">(${stock.account})</span></h4>
                                 <p>0 股 (已清倉)</p>
                                 <div class="tags"><div class="tag" style="background:#555; color:#fff;">歷史紀錄</div></div>
                             </div>
@@ -607,12 +647,15 @@
         }
 
         window.openStockHistory = function(account, symbol) {
+            // 🌟 進入紀錄視窗時，標題顯示包含全名
             let niceName = getDisplayName(symbol);
             document.getElementById('history-title').innerText = `📑 ${niceName} (${account})`;
             const container = document.getElementById('history-list-container'); container.innerHTML = '';
             const txns = transactions.filter(t => t.account === account && t.symbol === symbol).reverse();
+            
             txns.forEach(t => {
                 let typeStr = t.type === 'BUY' ? '買入' : '賣出'; let typeClass = t.type === 'BUY' ? 'type-buy' : 'type-sell';
+                // 🌟 完美修復「修改」及「刪除」按鈕顯示
                 container.innerHTML += `
                     <div class="history-item">
                         <div class="history-detail">
@@ -626,10 +669,17 @@
                         </div>
                     </div>`;
             });
+
+            // 🌟 批量刪除按鈕
+            container.innerHTML += `
+                <div style="text-align:center; margin-top:20px; padding-top:15px; border-top:1px solid #444;">
+                    <button class="btn btn-cancel" style="background:#FF1744; width:100%; border-radius:8px;" onclick="deleteAllTransactions('${account}', '${symbol}')">🗑️ 清空此股票全部紀錄</button>
+                </div>
+            `;
+
             document.getElementById('history-modal').style.display = 'flex';
         };
 
-        // 🌟 新增的「打開修改視窗」功能
         window.openEditTransaction = function(docId) {
             const txn = transactions.find(t => t.id === docId);
             if (!txn) return;
@@ -638,13 +688,11 @@
             document.getElementById('input-type').value = txn.type;
             document.getElementById('input-date').value = txn.date;
             document.getElementById('input-account').value = txn.account;
-            // 讀取時，還原全名方便使用者觀看
             document.getElementById('input-symbol').value = getDisplayName(txn.symbol);
             document.getElementById('input-shares').value = txn.shares;
             document.getElementById('input-price').value = txn.price;
             document.getElementById('input-fee').value = txn.fee || 0;
             
-            // 將按鈕與標題變成「修改」狀態
             document.getElementById('transaction-modal-title').innerText = "✏️ 修改交易紀錄";
             document.getElementById('btn-save').innerText = "儲存修改";
             
@@ -653,8 +701,32 @@
             updateAvailableSharesHint();
         };
 
-        window.deleteTransaction = async function(docId) { if(confirm("確定刪除這筆交易紀錄？這會重新計算您的持倉與成本！")) { await deleteDoc(doc(db, "users", currentUser.uid, "transactions", docId)); transactions = transactions.filter(t => t.id !== docId); document.getElementById('history-modal').style.display = 'none'; renderDashboard(); } };
+        window.deleteTransaction = async function(docId) { 
+            if(confirm("確定刪除這筆單一交易？")) { 
+                await deleteDoc(doc(db, "users", currentUser.uid, "transactions", docId)); 
+                transactions = transactions.filter(t => t.id !== docId); 
+                document.getElementById('history-modal').style.display = 'none'; 
+                renderDashboard(); 
+            } 
+        };
 
+        // 🌟 批量刪除功能
+        window.deleteAllTransactions = async function(account, symbol) {
+            let niceName = getDisplayName(symbol);
+            if(confirm(`⚠️ 極度危險：確定要永久刪除「${account}」裡面「${niceName}」的 所有交易紀錄 嗎？此動作無法復原！`)) {
+                const txnsToDelete = transactions.filter(t => t.account === account && t.symbol === symbol);
+                const batch = writeBatch(db);
+                txnsToDelete.forEach(t => {
+                    batch.delete(doc(db, "users", currentUser.uid, "transactions", t.id));
+                });
+                await batch.commit();
+                transactions = transactions.filter(t => !(t.account === account && t.symbol === symbol));
+                document.getElementById('history-modal').style.display = 'none';
+                renderDashboard();
+            }
+        };
+
+        // CSV 匯出/匯入 (支援 HKG: 格式轉換)
         window.exportCSV = function() {
             if (transactions.length === 0) { alert("沒有交易紀錄可供匯出！"); return; }
             let csvContent = "\uFEFFDate,Type,Account,Symbol,Shares,Price,Fee\n";
@@ -693,7 +765,7 @@
         
         // 🌟 主頁 + 號按鈕，重置為「新增」狀態
         document.getElementById('add-btn').addEventListener('click', () => { 
-            editingTxnId = null; // 清除 ID 代表新增模式
+            editingTxnId = null; 
             document.getElementById('transaction-modal-title').innerText = "新增交易紀錄";
             document.getElementById('btn-save').innerText = "記錄交易";
             
