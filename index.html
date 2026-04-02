@@ -461,7 +461,7 @@
             alert(`✅ 驗證成功！已徹底清空「${accountName}」內的 ${txnsToDelete.length} 筆紀錄。`);
         }
 
-        // --- 🌟 終極自動化 Google Sheet API 大腦 (含 redirect: 'follow') ---
+       // --- 🌟 終極自動化 Google Sheet API 大腦 ---
         const GOOGLE_APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzPyE5DSjU50u5I_LTA8qNRASewK-sCkblEB8FcZvGvp1LdbZx08kbMlrr5eNUHMLL_uQ/exec";
 
         document.getElementById('refresh-prices-btn').addEventListener('click', async () => {
@@ -474,14 +474,20 @@
                     alert("沒有持倉股票需要更新！"); btn.innerText = "🔄 現價"; btn.disabled = false; return;
                 }
 
-                // 組合網址，注意不要有多餘的 ?symbols=...
                 const requestUrl = `${GOOGLE_APP_SCRIPT_URL}?symbols=${uniqueSymbols.join(',')}`;
-                
-                // 🌟 必須加上 redirect: 'follow' 來穿透 Google 的 CORS 重導向
                 const response = await fetch(requestUrl, { redirect: 'follow' }); 
                 if (!response.ok) throw new Error("無法連接 Google 智能大腦");
                 
-                const fullData = await response.json(); 
+                // 🌟 照妖鏡：先攞純文字出嚟睇吓 Google 到底回傳咩
+                const rawText = await response.text();
+                
+                // 檢查如果 Google 俾咗個 HTML 登入畫面你（常見權限攔截）
+                if (rawText.includes("<!DOCTYPE html>")) {
+                    alert("❌ 慘！Google 攔截咗，要求登入！請去 Apps Script 確保「誰可以存取」設定為「所有人 (Anyone)」！");
+                    btn.innerText = "🔄 現價"; btn.disabled = false; return;
+                }
+
+                const fullData = JSON.parse(rawText); 
                 let updatedCount = 0; let missingSymbols = [];
 
                 for (let ticker of uniqueSymbols) {
@@ -507,7 +513,10 @@
                     
                     if (missingSymbols.length > 0) alert(`✅ 成功更新 ${updatedCount} 隻股票！\n⚠️ 伺服器繁忙，以下股票暫時無法獲取全部數據：${missingSymbols.join(', ')}`);
                     else alert(`✅ 成功從 Google Finance 獲取 ${updatedCount} 隻股票的最新報價及基本面數據！`);
-                } else { alert("⚠️ 獲取失敗，Google Finance 正在運算中，請稍後再試！"); }
+                } else { 
+                    // 🌟 如果仲係出錯，將 rawText 直接嘔出嚟俾老闆你睇！
+                    alert(`⚠️ 獲取失敗！\n\n【照妖鏡數據睇吓係咩事】：\n${rawText.substring(0, 300)}`); 
+                }
 
             } catch (error) { alert("❌ 更新失敗：" + error.message); }
             btn.innerText = "🔄 現價"; btn.disabled = false;
