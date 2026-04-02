@@ -531,68 +531,46 @@
 
         document.getElementById('refresh-prices-btn').addEventListener('click', async () => {
             const btn = document.getElementById('refresh-prices-btn');
-            btn.innerText = "🔄 雲端運算中..."; btn.disabled = true;
+            btn.innerText = "🔄 全數據獲取中..."; btn.disabled = true;
             
             try {
-                // 自動收集你手頭上有嘅股票 (例如: ['0700.HK', 'AAPL'])
                 const uniqueSymbols = [...new Set(transactions.map(t => cleanTicker(t.symbol)))];
-                if (uniqueSymbols.length === 0) {
-                    alert("沒有持倉股票需要更新！");
-                    btn.innerText = "🔄 現價"; btn.disabled = false;
-                    return;
-                }
+                if (uniqueSymbols.length === 0) return;
 
-                // 將代號串連，發送俾 Google 機器人幫手查價
                 const requestUrl = `${GOOGLE_APP_SCRIPT_URL}?symbols=${uniqueSymbols.join(',')}`;
-                
-                // 加入 redirect: 'follow' 確保能穿透 Google 的重新導向
                 const response = await fetch(requestUrl, { redirect: 'follow' });
-                if (!response.ok) throw new Error("無法連接 Google 智能大腦");
-                
-                // 接收 Google 處理完嘅結果
-                const sheetPrices = await response.json();
+                const fullData = await response.json(); // 宜家收到的是一個 Object { "0700.HK": { "price": 300, "changepct": 1.5 ... } }
                 
                 let updatedCount = 0;
-                let missingSymbols = [];
-
-                // 將價錢 Update 返落 App 度
-                for (let ticker of uniqueSymbols) {
-                    if (sheetPrices[ticker] && sheetPrices[ticker] > 0) {
-                        marketPrices[ticker] = sheetPrices[ticker];
+                
+                // 🌟 這裡你可以把 fullData 存入 Firebase，供以後「策略」使用
+                // 我們先更新最核心的價錢，讓 Dashboard 運作
+                for (let ticker in fullData) {
+                    if (fullData[ticker].price > 0) {
+                        marketPrices[ticker] = fullData[ticker].price;
+                        // 你可以順便存儲其他資料到一個全域變數，方便顯示
+                        // 例如：stockExtraInfo[ticker] = fullData[ticker];
                         updatedCount++;
-                    } else {
-                        missingSymbols.push(ticker);
                     }
                 }
 
                 if (updatedCount > 0) {
-                    const now = new Date(); 
-                    lastUpdatedTime = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')} (Google大腦)`;
-                    
+                    // 更新時間與寫入 Firebase... (保留你原本那段 setDoc 代碼)
                     await setDoc(doc(db, "users", currentUser.uid), { 
-                        marketPrices: marketPrices, 
-                        lastUpdatedTime: lastUpdatedTime 
+                        marketPrices: marketPrices,
+                        // 🌟 建議：將整份豪華數據存入雲端，以後策略模組直接讀
+                        stockDetails: fullData, 
+                        lastUpdatedTime: new Date().toLocaleString() + " (Google豪華版)"
                     }, { merge: true });
-                    
-                    document.getElementById('last-updated-time').innerText = `最後更新: ${lastUpdatedTime}`;
-                    renderDashboard(); 
-                    
-                    if (missingSymbols.length > 0) {
-                        alert(`✅ 成功更新 ${updatedCount} 隻股票！\n⚠️ 伺服器繁忙，以下股票暫時回傳空值：${missingSymbols.join(', ')} (可稍後再試)`);
-                    } else {
-                        alert(`✅ 成功從 Google 智能大腦極速更新 ${updatedCount} 隻股票！`);
-                    }
-                } else { 
-                    alert("⚠️ 獲取失敗，Google Finance 正在努力運算中 (或遇到假日時延)，請等 5 秒後再試！"); 
-                }
 
+                    renderDashboard();
+                    alert(`✅ 成功獲取 ${updatedCount} 隻股票的完整行情與基本面數據！`);
+                }
             } catch (error) {
                 alert("❌ 更新失敗：" + error.message);
             }
-            
             btn.innerText = "🔄 現價"; btn.disabled = false;
         });
-
         function updateAvailableSharesHint() {
             const type = document.getElementById('input-type').value; const hint = document.getElementById('available-shares-hint');
             if (type !== 'SELL') { hint.style.display = 'none'; return; }
