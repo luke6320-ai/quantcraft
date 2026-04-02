@@ -527,7 +527,7 @@
         });
 
         // --- 🌟 終極自動化 Google Sheet API 大腦 ---
-        const GOOGLE_APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzPyE5DSjU50u5I_LTA8qNRASewK-sCkblEB8FcZvGvp1LdbZx08kbMlrr5eNUHMLL_uQ/exec";
+        const GOOGLE_APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz8wLT8ALnthZ_Uq0c_KpqYxLpO9hlk72HFdKJ808n6RmfXhtJVZjpEE-Vzn9zuUCVAyQ/exec";
 
         document.getElementById('refresh-prices-btn').addEventListener('click', async () => {
             const btn = document.getElementById('refresh-prices-btn');
@@ -545,7 +545,8 @@
                 // 將代號串連，發送俾 Google 機器人幫手查價
                 const requestUrl = `${GOOGLE_APP_SCRIPT_URL}?symbols=${uniqueSymbols.join(',')}`;
                 
-                const response = await fetch(requestUrl);
+                // 加入 redirect: 'follow' 確保能穿透 Google 的重新導向
+                const response = await fetch(requestUrl, { redirect: 'follow' });
                 if (!response.ok) throw new Error("無法連接 Google 智能大腦");
                 
                 // 接收 Google 處理完嘅結果
