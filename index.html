@@ -526,49 +526,69 @@
             btn.innerText = "🔍 即時價";
         });
 
+        // --- 🌟 終極自動化 Google Sheet API 大腦 ---
+        const GOOGLE_APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzPyE5DSjU50u5I_LTA8qNRASewK-sCkblEB8FcZvGvp1LdbZx08kbMlrr5eNUHMLL_uQ/exec";
+
         document.getElementById('refresh-prices-btn').addEventListener('click', async () => {
             const btn = document.getElementById('refresh-prices-btn');
-            btn.innerText = "🔄 更新中..."; btn.disabled = true;
+            btn.innerText = "🔄 雲端運算中..."; btn.disabled = true;
             
-            const uniqueSymbols = [...new Set(transactions.map(t => cleanTicker(t.symbol)))];
-            let updatedCount = 0;
-            let failedSymbols = [];
+            try {
+                // 自動收集你手頭上有嘅股票 (例如: ['0700.HK', 'AAPL'])
+                const uniqueSymbols = [...new Set(transactions.map(t => cleanTicker(t.symbol)))];
+                if (uniqueSymbols.length === 0) {
+                    alert("沒有持倉股票需要更新！");
+                    btn.innerText = "🔄 現價"; btn.disabled = false;
+                    return;
+                }
 
-            for (let ticker of uniqueSymbols) {
-                try {
-                    const stockData = await fetchYahooQuote(ticker);
-                    if (stockData && stockData.price) { 
-                        marketPrices[ticker] = stockData.price; 
-                        updatedCount++; 
+                // 將代號串連，發送俾 Google 機器人幫手查價
+                const requestUrl = `${GOOGLE_APP_SCRIPT_URL}?symbols=${uniqueSymbols.join(',')}`;
+                
+                const response = await fetch(requestUrl);
+                if (!response.ok) throw new Error("無法連接 Google 智能大腦");
+                
+                // 接收 Google 處理完嘅結果
+                const sheetPrices = await response.json();
+                
+                let updatedCount = 0;
+                let missingSymbols = [];
+
+                // 將價錢 Update 返落 App 度
+                for (let ticker of uniqueSymbols) {
+                    if (sheetPrices[ticker] && sheetPrices[ticker] > 0) {
+                        marketPrices[ticker] = sheetPrices[ticker];
+                        updatedCount++;
                     } else {
-                        failedSymbols.push(ticker);
+                        missingSymbols.push(ticker);
                     }
-                } catch (error) {
-                    failedSymbols.push(ticker);
                 }
+
+                if (updatedCount > 0) {
+                    const now = new Date(); 
+                    lastUpdatedTime = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')} (Google大腦)`;
+                    
+                    await setDoc(doc(db, "users", currentUser.uid), { 
+                        marketPrices: marketPrices, 
+                        lastUpdatedTime: lastUpdatedTime 
+                    }, { merge: true });
+                    
+                    document.getElementById('last-updated-time').innerText = `最後更新: ${lastUpdatedTime}`;
+                    renderDashboard(); 
+                    
+                    if (missingSymbols.length > 0) {
+                        alert(`✅ 成功更新 ${updatedCount} 隻股票！\n⚠️ 伺服器繁忙，以下股票暫時回傳空值：${missingSymbols.join(', ')} (可稍後再試)`);
+                    } else {
+                        alert(`✅ 成功從 Google 智能大腦極速更新 ${updatedCount} 隻股票！`);
+                    }
+                } else { 
+                    alert("⚠️ 獲取失敗，Google Finance 正在努力運算中 (或遇到假日時延)，請等 5 秒後再試！"); 
+                }
+
+            } catch (error) {
+                alert("❌ 更新失敗：" + error.message);
             }
             
-            if (updatedCount > 0) {
-                const now = new Date(); 
-                lastUpdatedTime = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')} (手動更新)`;
-                
-                // ⚠️ 唔再覆寫 stockNames，以免洗走 Python 機器人嘅資料
-                await setDoc(doc(db, "users", currentUser.uid), { 
-                    marketPrices: marketPrices, 
-                    lastUpdatedTime: lastUpdatedTime 
-                }, { merge: true });
-                
-                document.getElementById('last-updated-time').innerText = `最後更新: ${lastUpdatedTime}`;
-                renderDashboard(); 
-                
-                if (failedSymbols.length > 0) {
-                    alert(`✅ 成功更新 ${updatedCount} 隻股票。\n⚠️ 以下股票被 Yahoo 暫時擋截：${failedSymbols.join(', ')}`);
-                } else {
-                    alert(`✅ 成功極速更新 ${updatedCount} 隻股票！`);
-                }
-            } else { 
-                alert("❌ 全部更新失敗！Yahoo Finance 暫時封鎖了前端連線，請稍後再試，或依賴每日下午的自動更新。"); 
-            }
             btn.innerText = "🔄 現價"; btn.disabled = false;
         });
 
