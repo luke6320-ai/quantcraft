@@ -37,9 +37,15 @@
         .hero-card { background: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%); margin: 0 20px; padding: 25px 20px; border-radius: 20px; text-align: center; position: relative;}
         .net-worth-title { color: #aaaaaa; font-size: 0.9rem; margin-bottom: 5px; }
         .net-worth-value { font-size: 2.5rem; font-weight: bold; margin: 0; }
-        .daily-pl { font-size: 1rem; margin-top: 5px; font-weight: bold; } 
         .profit { color: #00E676; } .loss { color: #FF1744; }
-        .last-update-label { font-size: 0.75rem; color: #888; margin-top: 10px; font-style: italic; }
+        .last-update-label { font-size: 0.75rem; color: #888; margin-top: 15px; font-style: italic; }
+
+        /* 資產總結面板 */
+        .summary-box { display: flex; justify-content: space-between; background: rgba(0,0,0,0.25); margin-top: 15px; padding: 12px; border-radius: 12px; font-size: 0.85rem; border: 1px solid #333;}
+        .summary-item { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 33%;}
+        .summary-item:not(:last-child) { border-right: 1px solid #444; }
+        .summary-label { color: #aaa; font-size: 0.75rem;}
+        .summary-val { font-weight: bold; font-size: 0.95rem; }
 
         .account-tabs { display: flex; justify-content: center; margin-top: 20px; gap: 10px; flex-wrap: wrap; }
         .tab { background-color: #333; padding: 5px 15px; border-radius: 15px; font-size: 0.8rem; color: #ccc; cursor: pointer; }
@@ -63,13 +69,11 @@
         .row-info p { margin: 5px 0 0 0; font-size: 0.8rem; color: #aaa; }
         .row-right { text-align: right; margin-left: 10px; }
         .row-right h4 { margin: 0; font-size: 1.1rem; }
-        .row-right p { margin: 5px 0 0 0; font-size: 0.8rem; font-weight: bold;}
         .tags { display: flex; gap: 5px; margin-top: 8px; flex-wrap: wrap;}
         .tag { font-size: 0.7rem; padding: 3px 8px; border-radius: 8px; }
         .tag-green { background-color: rgba(0, 230, 118, 0.2); color: #00E676; border: 1px solid #00E676; }
         .tag-red { background-color: rgba(255, 23, 68, 0.2); color: #FF1744; border: 1px solid #FF1744; }
 
-        /* 🌟 專業數據面板 CSS */
         .prof-panel { font-size: 0.75rem; color: #aaa; margin-top: 10px; border-top: 1px dashed #444; padding-top: 8px; line-height: 1.5; }
         .prof-panel span.val { font-weight: bold; color: #ddd; }
 
@@ -152,9 +156,24 @@
 
         <div id="page-dashboard">
             <div class="hero-card">
-                <div class="net-worth-title">總資產淨值 (HKD)</div>
+                <div class="net-worth-title">總資產現值 (HKD)</div>
                 <h1 class="net-worth-value" id="total-asset">$0.00</h1>
-                <div class="daily-pl profit" id="daily-pl">+$0.00 (0.00%)</div>
+                
+                <div class="summary-box" id="summary-box">
+                    <div class="summary-item">
+                        <span class="summary-label">總投入成本</span>
+                        <span class="summary-val" id="total-cost">$0.00</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-label">累積回報率</span>
+                        <span class="summary-val profit" id="total-return">+$0.00 (0.00%)</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-label">今日真實盈虧</span>
+                        <span class="summary-val profit" id="daily-pl">+$0.00</span>
+                    </div>
+                </div>
+
                 <div class="last-update-label" id="last-updated-time">最後更新: 尚未更新</div>
                 <div class="account-tabs" id="tabs-container"></div>
             </div>
@@ -461,8 +480,8 @@
             alert(`✅ 驗證成功！已徹底清空「${accountName}」內的 ${txnsToDelete.length} 筆紀錄。`);
         }
 
-       // --- 🌟 終極自動化 Google Sheet API 大腦 ---
-        const GOOGLE_APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz4IywFBl6I9dGV5yL9svim2YBnv8tgrSjAw5zYMr2o9BpXL0vwNA7wk9VdcVO_M4Zv7w/exec";
+        // --- 🌟 Google Sheet API 大腦連線 ---
+        const GOOGLE_APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzPyE5DSjU50u5I_LTA8qNRASewK-sCkblEB8FcZvGvp1LdbZx08kbMlrr5eNUHMLL_uQ/exec";
 
         document.getElementById('refresh-prices-btn').addEventListener('click', async () => {
             const btn = document.getElementById('refresh-prices-btn');
@@ -478,10 +497,7 @@
                 const response = await fetch(requestUrl, { redirect: 'follow' }); 
                 if (!response.ok) throw new Error("無法連接 Google 智能大腦");
                 
-                // 🌟 照妖鏡：先攞純文字出嚟睇吓 Google 到底回傳咩
                 const rawText = await response.text();
-                
-                // 檢查如果 Google 俾咗個 HTML 登入畫面你（常見權限攔截）
                 if (rawText.includes("<!DOCTYPE html>")) {
                     alert("❌ 慘！Google 攔截咗，要求登入！請去 Apps Script 確保「誰可以存取」設定為「所有人 (Anyone)」！");
                     btn.innerText = "🔄 現價"; btn.disabled = false; return;
@@ -514,7 +530,6 @@
                     if (missingSymbols.length > 0) alert(`✅ 成功更新 ${updatedCount} 隻股票！\n⚠️ 伺服器繁忙，以下股票暫時無法獲取全部數據：${missingSymbols.join(', ')}`);
                     else alert(`✅ 成功從 Google Finance 獲取 ${updatedCount} 隻股票的最新報價及基本面數據！`);
                 } else { 
-                    // 🌟 如果仲係出錯，將 rawText 直接嘔出嚟俾老闆你睇！
                     alert(`⚠️ 獲取失敗！\n\n【照妖鏡數據睇吓係咩事】：\n${rawText.substring(0, 300)}`); 
                 }
 
@@ -522,7 +537,6 @@
             btn.innerText = "🔄 現價"; btn.disabled = false;
         });
 
-        // 輔助查價引擎 (備用)
         async function fetchYahooQuote(query) {
             let ticker = cleanTicker(query);
             const yfUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}`;
@@ -656,7 +670,7 @@
             const filtered = currentTab === '全部' ? holdings : holdings.filter(h => h.account === currentTab);
             let activeHoldings = filtered.filter(h => h.shares > 0); 
             let closedHoldings = filtered.filter(h => h.shares === 0);
-            let totalVal = 0, totalCost = 0;
+            let totalVal = 0, totalCost = 0, dailyPLVal = 0;
 
             const sortMode = document.getElementById('sort-holdings').value;
             const sortFunc = (a, b) => {
@@ -674,11 +688,21 @@
             if(activeHoldings.length === 0) { list.innerHTML += `<p style="text-align:center;color:#888;margin-bottom:20px;">無現有持倉</p>`; } 
             else {
                 activeHoldings.forEach((stock) => {
-                    let currentPrice = marketPrices[stock.symbol] || (stock.totalCost / stock.shares); 
-                    let currentVal = stock.shares * currentPrice; let pl = currentVal - stock.totalCost; let realizedPL = stock.realizedPL || 0;
+                    let avgCost = stock.totalCost / stock.shares;
+                    let currentPrice = marketPrices[stock.symbol] || avgCost; 
+                    let currentVal = stock.shares * currentPrice; 
+                    let pl = currentVal - stock.totalCost; 
+                    let realizedPL = stock.realizedPL || 0;
+                    
+                    // 🌟 計算個別股票的 ROI (%)
+                    let plPct = stock.totalCost > 0 ? (pl / stock.totalCost * 100) : 0;
+
                     totalVal += currentVal; totalCost += stock.totalCost;
                     
                     let details = stockDetails[stock.symbol] || {};
+                    let dailyChange = details.change || 0;
+                    dailyPLVal += stock.shares * dailyChange;
+
                     let todayChangePct = details.changepct;
                     let todayTagHtml = "";
                     if (todayChangePct !== undefined && !isNaN(todayChangePct)) {
@@ -701,17 +725,30 @@
                         </div>
                     `;
 
+                    let plClass = pl >= 0 ? 'profit' : 'loss';
+                    let plSign = pl >= 0 ? '+' : '';
+                    let plBgColor = pl >= 0 ? 'rgba(0, 230, 118, 0.15)' : 'rgba(255, 23, 68, 0.15)';
+
+                    // 🌟 注入新的個別成本和百分比 (ROI) 介面
                     list.innerHTML += `
                         <div class="list-row" onclick="openStockHistory('${stock.account}', '${stock.symbol}')">
                             <div class="row-info">
                                 <h4>${stock.symbol} <span style="font-size:0.7rem; color:#888;">(${stock.account})</span></h4>
-                                <p>平均成本: $${(stock.totalCost / stock.shares).toFixed(2)} | ${stock.shares}股</p>
+                                <p style="margin-top: 4px; line-height: 1.4;">
+                                    均價: $${avgCost.toFixed(2)} | ${stock.shares}股<br>
+                                    <span style="color: #ddd;">總成本: $${stock.totalCost.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
+                                </p>
                                 <div class="tags">${tagsHtml}</div>
                                 ${profPanelHtml}
                             </div>
-                            <div class="row-right">
-                                <h4>$${currentPrice.toFixed(2)}</h4>
-                                <p class="${pl >= 0 ? 'profit' : 'loss'}">${pl >= 0 ? '+' : ''}$${pl.toFixed(2)}</p>
+                            <div class="row-right" style="display: flex; flex-direction: column; align-items: flex-end;">
+                                <h4 style="margin-bottom: 5px;">$${currentPrice.toFixed(2)}</h4>
+                                <div class="${plClass}" style="font-size: 0.95rem; font-weight: bold;">
+                                    ${plSign}$${Math.abs(pl).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}
+                                </div>
+                                <div class="${plClass}" style="font-size: 0.75rem; font-weight: bold; margin-top: 3px; padding: 2px 6px; border-radius: 4px; background: ${plBgColor};">
+                                    ${plSign}${Math.abs(plPct).toFixed(2)}%
+                                </div>
                             </div>
                         </div>`;
                 });
@@ -734,10 +771,28 @@
             }
 
             let totalPL = totalVal - totalCost;
+            let totalReturnPct = totalCost > 0 ? (totalPL / totalCost * 100).toFixed(2) : '0.00';
+
             if (!isHidden) {
                 document.getElementById('total-asset').innerText = '$' + totalVal.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
-                document.getElementById('daily-pl').innerText = `${totalPL >= 0 ? '+' : ''}$${Math.abs(totalPL).toLocaleString('en-US', {minimumFractionDigits:2})} (${totalCost>0 ? (totalPL/totalCost*100).toFixed(2) : '0.00'}%)`;
-                document.getElementById('daily-pl').className = `daily-pl ${totalPL >= 0 ? 'profit' : 'loss'}`;
+                document.getElementById('total-cost').innerText = '$' + totalCost.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+                
+                let returnEl = document.getElementById('total-return');
+                returnEl.innerText = `${totalPL >= 0 ? '+' : ''}$${Math.abs(totalPL).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})} (${totalPL >= 0 ? '+' : ''}${totalReturnPct}%)`;
+                returnEl.className = `summary-val ${totalPL >= 0 ? 'profit' : 'loss'}`;
+
+                let dailyEl = document.getElementById('daily-pl');
+                dailyEl.innerText = `${dailyPLVal >= 0 ? '+' : ''}$${Math.abs(dailyPLVal).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
+                dailyEl.className = `summary-val ${dailyPLVal >= 0 ? 'profit' : 'loss'}`;
+            } else {
+                document.getElementById('total-asset').innerText = '********';
+                document.getElementById('total-cost').innerText = '********';
+                
+                let returnEl = document.getElementById('total-return');
+                returnEl.innerText = '********'; returnEl.className = 'summary-val';
+                
+                let dailyEl = document.getElementById('daily-pl');
+                dailyEl.innerText = '********'; dailyEl.className = 'summary-val';
             }
         }
 
@@ -820,7 +875,21 @@
             document.getElementById('add-modal').style.display = 'flex'; updateAvailableSharesHint(); 
         });
         
-        document.getElementById('toggle-visibility').addEventListener('click', function() { isHidden = !isHidden; this.innerText = isHidden ? '🙈' : '👁️'; if(isHidden) { document.getElementById('total-asset').innerText = '********'; document.getElementById('daily-pl').innerText = '****'; document.getElementById('daily-pl').className = 'daily-pl'; document.getElementById('chart-section').style.display = 'none'; } else { renderDashboard(); } });
+        document.getElementById('toggle-visibility').addEventListener('click', function() { 
+            isHidden = !isHidden; 
+            this.innerText = isHidden ? '🙈' : '👁️'; 
+            if(isHidden) { 
+                document.getElementById('total-asset').innerText = '********'; 
+                document.getElementById('total-cost').innerText = '********'; 
+                document.getElementById('total-return').innerText = '********'; 
+                document.getElementById('total-return').className = 'summary-val'; 
+                document.getElementById('daily-pl').innerText = '********'; 
+                document.getElementById('daily-pl').className = 'summary-val'; 
+                document.getElementById('chart-section').style.display = 'none'; 
+            } else { 
+                renderDashboard(); 
+            } 
+        });
     </script>
 </body>
 </html>
